@@ -45,6 +45,12 @@ public class Enemy : Entity
     public int attackCoolFrame = 180;
     public int leftAttackCoolFrame;
 
+    public float jumpSpeed = 5.0f;
+    // TODO: 본프로젝트에 대입한 후 사용하기.
+    // public int jumpFrame = 18;
+    // private int leftJumpFrame;
+    // private DiscreteGraph graph;
+
     public Transform capturedTransform;
 
     private bool isEndOfState;
@@ -59,6 +65,23 @@ public class Enemy : Entity
     private Vector2 dir_fPos;
     private Vector2 dir_flPos;
     private Vector2 dir_frPos;
+
+    private Vector2 hPos;
+    private Vector2 hlPos;
+    private Vector2 hrPos;
+    private Vector2 fPos;
+    private Vector2 flPos;
+    private Vector2 frPos;
+
+    private void UpdatePos()
+    {
+        hPos = transform.position + (Vector3)dir_hPos;
+        hlPos = transform.position + (Vector3)dir_hlPos;
+        hrPos = transform.position + (Vector3)dir_hrPos;
+        fPos = transform.position + (Vector3)dir_fPos;
+        flPos = transform.position + (Vector3)dir_flPos;
+        frPos = transform.position + (Vector3)dir_frPos;
+    }
 
     private void CapturePlayer()
     {
@@ -98,6 +121,65 @@ public class Enemy : Entity
         capturedTransform = null;
         detect1 = false;
         detect2 = false;
+    }
+
+private RaycastHit2D detectedGround;
+public bool isDetectedGround;
+    protected void CheckGround_()
+    {
+        CheckGroundAll(out detectedGround, out isDetectedGround, fPos, 0.5f);
+
+        if(!isDetectedGround)
+            isHitGround = false;
+        else
+            isHitGround = detectedGround.distance <= 0.04f;
+    }
+
+private RaycastHit2D detectedWallB;
+private RaycastHit2D detectedWallT;
+    protected void CheckWall_()
+    {
+        Vector2 fsPos = Vector2.zero;
+        Vector2 hsPos = Vector2.zero;
+
+        if(lookDir == 1)
+        {
+            fsPos = frPos;
+            hsPos = hrPos;
+        }
+        else if(lookDir == -1)
+        {
+            fsPos = flPos;
+            hsPos = hlPos;
+        }
+
+        float detectLength = 0.04f;
+        base.CheckWall(out detectedWallB, out isHitWallB, fsPos, detectLength, lookDir);
+        base.CheckWall(out detectedWallT, out isHitWallT, fsPos, detectLength, lookDir);
+    }
+
+private RaycastHit2D detectedGroundLower;
+public bool isDetectedLedge;
+    protected void CheckLedgeLower_()
+    {
+        Vector2 p = Vector2.zero;
+
+        if(lookDir == 1)
+            p = frPos;
+        else
+            p = flPos;
+
+        float detectLength = col.shortSize * 2 + 0.04f;
+
+        bool _d = false;
+        base.CheckGroundAll(out detectedGroundLower, out _d, p, detectLength);
+
+        isDetectedLedge = !_d;
+
+        if(isDetectedLedge)
+            isOnLedge = lookDir;
+        else
+            isOnLedge = 0;
     }
 
     #region Unity Event Functions
@@ -154,7 +236,12 @@ public class Enemy : Entity
     {
         base.FixedUpdate();
 
+        UpdatePos();
         CapturePlayer();
+
+        CheckGround_();
+        CheckWall_();
+        CheckLedgeLower_();
 
         m_machine.UpdateLogic();
 
@@ -189,12 +276,14 @@ public class Enemy : Entity
     private void Logic_Idle()
     {
         float vx = 0.0f;
-        float vy = 0.0f;
+
+        SetVelocityX(vx);
 
         if(!isHitGround)
-            vy = rigid.velocity.y;
-
-        SetVelocityXY(vx, vy);
+        {
+            float vy = rigid.velocity.y;
+            SetVelocityY(vy);
+        }
     }
     #endregion
 
@@ -231,15 +320,19 @@ public class Enemy : Entity
     }
     #endregion
 
+private bool isCancelOfAction;
     #region Implement State; stReadyMove
     private void Enter_ReadyMove()
     {
         leftFps = (int)m_prng.RangeNextDouble(avgFrame, rngFrame);
+        isCancelOfAction = false;
 
         if(isHitWallB == 0 && isHitWallT == 0 && isOnLedge == 0)
             lookDir = m_prng.Next(0, 100) < 70 ? -lookDir : lookDir;
-        else if(isHitWallB == isHitWallT)
+        else if(isHitWallB != 0 && isHitWallB == lookDir)
             lookDir = -isHitWallB;
+        else if(isHitWallT != 0 && isHitWallT == lookDir)
+            lookDir = - isHitWallT;
         else
             lookDir = -isOnLedge;
     }
@@ -250,7 +343,7 @@ public class Enemy : Entity
             m_machine.ChangeState(stDie);
         else if(detect2)
             m_machine.ChangeState(stTrace);
-        else if(leftFps == 0)
+        else if(isCancelOfAction ||  leftFps == 0)
             m_machine.ChangeState(stReadyIdle);
     }
 
@@ -258,9 +351,18 @@ public class Enemy : Entity
     {
         if(leftFps > 0)
         {
-            leftFps--;
-            Logic_MoveOnGround(Vector2.right, moveSpeed, lookDir);
-            Debug.Log("ready move");
+            if(
+                (isOnLedge != 0 && isOnLedge == lookDir) ||
+                (isHitWallB != 0 && isHitWallB == lookDir) ||
+                (isHitWallT != 0 && isHitWallT == lookDir)
+                )
+                isCancelOfAction = true;
+            else
+            {
+                leftFps--;
+                Logic_MoveOnGround(Vector2.right, moveSpeed, lookDir);
+                Debug.Log("ready move");
+            }
         }
     }
     #endregion
@@ -272,7 +374,7 @@ public class Enemy : Entity
             m_machine.ChangeState(stDie);
         else if(detect1 && leftAttackCoolFrame == 0)
             m_machine.ChangeState(stAttack);
-        else if(isOnLedge != 0 && leftJumpCoolFrame == 0)
+        else if(!detect1 && isOnLedge != 0 && leftJumpCoolFrame == 0)
             m_machine.ChangeState(stJump);
         else if(!detect2)
         {
@@ -287,17 +389,17 @@ public class Enemy : Entity
 
     private void Logic_Trace()
     {
-        if(capturedTransform != null && !detect1)
+        if(capturedTransform != null)
         {
             float dx = capturedTransform.position.x - transform.position.x;
+            lookDir = dx < 0 ? -1 : 1;
 
-            if(dx < 0)
-                lookDir = -1;
-            else
-                lookDir = 1;
-
-            Logic_MoveOnGround(Vector2.right, moveSpeed, lookDir);
-            Debug.Log("trace");
+            if(detect1)
+                SetVelocityX(0.0f);
+            else if(isOnLedge != 0 && leftJumpCoolFrame > 0)
+                SetVelocityX(0.0f);
+            else if(isDetectedGround)
+                Logic_MoveOnGround(Vector2.Perpendicular(-detectedGround.normal).normalized, moveSpeed, lookDir);
         }
     }
     #endregion
@@ -305,6 +407,7 @@ public class Enemy : Entity
     #region Implement State; stJump
     private void Enter_Jump()
     {
+        rigid.AddForce(Vector2.up * jumpSpeed, ForceMode2D.Impulse);
         leftJumpCoolFrame = jumpCoolFrame;
     }
 
@@ -312,6 +415,8 @@ public class Enemy : Entity
     {
         if(currentHealth <= 0)
             m_machine.ChangeState(stDie);
+        if(rigid.velocity.y <= 0.0f && isHitGround)
+            m_machine.ChangeState(stTrace);
     }
 
     private void Logic_Jump()
@@ -321,6 +426,10 @@ public class Enemy : Entity
         // TODO:
         // x축 이동 캔슬 로직
         // 점프 처음 시작한 바닥에서 더 높은 위치의 땅을 탐지했을 때 x축 이동 캔슬
+        // 의논이 필요함.
+
+        if(isHitWallB == 0 && isHitWallT == 0)
+            SetVelocityX(moveSpeed * lookDir);
     }
     #endregion
 
