@@ -185,4 +185,9 @@ public class Entity : MonoBehaviour
     {
         SetVelocityXY(vx * lookingDirection, vy);
     }
+
+    #region Battle Module Event Functions
+    public virtual void OnDamage(BattleModule pubModule, DamageEventData evdat) {}
+    public virtual void OnDie(BattleModule pubModule, DieEventData evdat) {}
+    #endregion
 }
